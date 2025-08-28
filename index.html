@@ -454,17 +454,17 @@
             }
 
             // Get or create consistent position for a member
-            function getMemberPosition(member, county, memberIndex) {
-                // Create a deterministic key based on member data that won't change
-                const memberKey = `${county}-${member['Join year']}-${member['Join month']}-${member['Sector represented '] || 'unknown'}-${member['Email preference'] || ''}-${memberIndex}`;
+            function getMemberPosition(member, county) {
+                // Use Object ID as the primary unique identifier
+                const memberKey = `${county}-${member['Object ID'] || member.uniqueId}`;
                 
                 if (!memberPositions[memberKey]) {
                     // This is a new member appearing for the first time - generate random position
                     memberPositions[memberKey] = getRandomPointInCounty(county);
-                    console.log(`New member placed at random position in ${county}: ${memberKey}`);
+                    console.log(`New member placed at random position in ${county}: ID ${member['Object ID']}`);
                 } else {
                     // This member already exists - use their cached position
-                    console.log(`Using cached position for existing member in ${county}: ${memberKey}`);
+                    console.log(`Using cached position for existing member in ${county}: ID ${member['Object ID']}`);
                 }
                 
                 return memberPositions[memberKey];
@@ -642,21 +642,29 @@
                 
                 // Group by county and sector for positioning
                 const countyData = {};
-                filteredData.forEach(row => {
+                filteredData.forEach((row, index) => {
                     const county = row['Primary county'];
-                    const sector = normalizeSector(row['Sector represented ']);
+                    const sector = normalizeSector(row['Sector represented ']) || 'Unknown';
+                    const objectId = row['Object ID'] || `fallback-${index}`;
                     
                     if (!countyData[county]) countyData[county] = {};
                     if (!countyData[county][sector]) countyData[county][sector] = [];
-                    countyData[county][sector].push(row);
+                    
+                    // Use Object ID to ensure no member is lost or duplicated
+                    const memberWithId = { ...row, objectId: objectId };
+                    countyData[county][sector].push(memberWithId);
                 });
                 
                 console.log('County data groups:', Object.keys(countyData));
-                console.log('County data breakdown:');
+                console.log('Detailed county breakdown:');
+                let totalMembersInGroups = 0;
                 Object.entries(countyData).forEach(([county, sectors]) => {
+                    const sectorCounts = Object.entries(sectors).map(([sector, members]) => `${sector}: ${members.length}`);
                     const total = Object.values(sectors).reduce((sum, members) => sum + members.length, 0);
-                    console.log(`  ${county}: ${total} members`);
+                    totalMembersInGroups += total;
+                    console.log(`  ${county}: ${total} members (${sectorCounts.join(', ')})`);
                 });
+                console.log(`Total members in groups: ${totalMembersInGroups} (should match filtered data: ${filteredData.length})`;
                 
                 // Create dots with consistent random positioning within county boundaries
                 let totalDotsAdded = 0;
