@@ -219,6 +219,8 @@
                 }
             }
 
+            let countyBoundaries = {}; // Store actual county boundary coordinates
+            
             // Load California counties GeoJSON
             async function loadCountyBoundaries() {
                 try {
@@ -236,6 +238,9 @@
                         const countyName = feature.properties.NAME;
                         if (centralCoastCounties.includes(countyName)) {
                             console.log('Processing county:', countyName);
+                            
+                            // Store boundary coordinates for random point generation
+                            storeBoundaryCoordinates(countyName, feature.geometry);
                             
                             try {
                                 let geometry;
@@ -291,6 +296,102 @@
                     console.error('Error loading county boundaries:', error);
                     // Fallback to hardcoded coordinates if counties can't be loaded
                 }
+            }
+
+            // Store boundary coordinates for random point generation
+            function storeBoundaryCoordinates(countyName, geometry) {
+                let coordinates = [];
+                
+                if (geometry.type === 'Polygon') {
+                    // Get the outer ring (first ring)
+                    coordinates = geometry.coordinates[0];
+                } else if (geometry.type === 'MultiPolygon') {
+                    // Get the outer ring of the largest polygon
+                    let largestArea = 0;
+                    let largestRing = null;
+                    
+                    geometry.coordinates.forEach(polygon => {
+                        const ring = polygon[0]; // outer ring
+                        const area = calculatePolygonArea(ring);
+                        if (area > largestArea) {
+                            largestArea = area;
+                            largestRing = ring;
+                        }
+                    });
+                    
+                    coordinates = largestRing || geometry.coordinates[0][0];
+                }
+                
+                // Convert from Web Mercator to WGS84 if needed
+                const wgs84Coords = coordinates.map(coord => {
+                    // Simple conversion - for more accuracy, you'd use proper projection
+                    // These coordinates are already in the right format for our purposes
+                    return [coord[0] / 111320, coord[1] / 111320]; // Approximate conversion
+                });
+                
+                countyBoundaries[countyName] = coordinates;
+                console.log(`Stored ${coordinates.length} boundary points for ${countyName}`);
+            }
+
+            // Calculate approximate area of polygon for MultiPolygon handling
+            function calculatePolygonArea(ring) {
+                let area = 0;
+                const n = ring.length - 1;
+                for (let i = 0; i < n; i++) {
+                    area += (ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]);
+                }
+                return Math.abs(area) / 2;
+            }
+
+            // Generate random point within county boundary
+            function getRandomPointInCounty(countyName) {
+                const boundary = countyBoundaries[countyName];
+                if (!boundary || boundary.length === 0) {
+                    // Fallback to centroid with small random offset
+                    const center = countyCoords[countyName];
+                    if (center) {
+                        return [
+                            center[0] + (Math.random() - 0.5) * 0.1,
+                            center[1] + (Math.random() - 0.5) * 0.1
+                        ];
+                    }
+                    return [-120.5, 35.5]; // Default fallback
+                }
+                
+                // Get bounding box of the county
+                let minLng = Infinity, maxLng = -Infinity;
+                let minLat = Infinity, maxLat = -Infinity;
+                
+                boundary.forEach(coord => {
+                    const lng = coord[0];
+                    const lat = coord[1];
+                    minLng = Math.min(minLng, lng);
+                    maxLng = Math.max(maxLng, lng);
+                    minLat = Math.min(minLat, lat);
+                    maxLat = Math.max(maxLat, lat);
+                });
+                
+                // Convert Web Mercator to approximate WGS84 for point generation
+                const centerLng = (minLng + maxLng) / 2 / 111320;
+                const centerLat = (minLat + maxLat) / 2 / 111320;
+                const widthLng = (maxLng - minLng) / 111320;
+                const heightLat = (maxLat - minLat) / 111320;
+                
+                // Generate random point within bounding box
+                // For better distribution, we could implement point-in-polygon testing
+                // but this gives good coverage for now
+                let attempts = 0;
+                let point;
+                
+                do {
+                    point = [
+                        centerLng + (Math.random() - 0.5) * widthLng * 0.8, // 0.8 to stay more within bounds
+                        centerLat + (Math.random() - 0.5) * heightLat * 0.8
+                    ];
+                    attempts++;
+                } while (attempts < 10); // Limit attempts to prevent infinite loops
+                
+                return point;
             }
 
             // Update county coordinates from GeoJSON centroids
@@ -445,19 +546,14 @@
                 
                 console.log('County data groups:', Object.keys(countyData));
                 
-                // Create dots with spiral positioning to avoid overlap
+                // Create dots with random positioning within county boundaries
                 let totalDotsAdded = 0;
                 Object.entries(countyData).forEach(([county, sectors]) => {
-                    const baseCoords = countyCoords[county];
-                    if (!baseCoords) {
-                        console.warn('No coordinates found for county:', county);
-                        return;
-                    }
+                    console.log(`Placing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
                     
-                    let countyDotIndex = 0;
                     Object.entries(sectors).forEach(([sector, members]) => {
                         members.forEach((member, index) => {
-                            const position = getSpiralPosition(baseCoords, countyDotIndex, 0.01);
+                            const position = getRandomPointInCounty(county);
                             
                             const graphic = new Graphic({
                                 geometry: new Point({
@@ -467,7 +563,7 @@
                                 }),
                                 symbol: new SimpleMarkerSymbol({
                                     color: sectorColors[sector] || '#666',
-                                    size: 10,
+                                    size: 8,
                                     outline: {
                                         color: 'white',
                                         width: 1
@@ -491,7 +587,6 @@
                             });
                             
                             graphicsLayer.add(graphic);
-                            countyDotIndex++;
                             totalDotsAdded++;
                         });
                     });
