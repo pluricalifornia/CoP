@@ -630,11 +630,17 @@
                     
                     if (selectedYear !== 'all' && row['Join year'] != selectedYear) return false;
                     
-                    // Show cumulative data up to current month/year
-                    const memberDate = new Date(row['Join year'], row['Join month'] - 1, 1);
-                    const currentDate = new Date(currentYear, currentMonth - 1, 1);
+                    // Show cumulative data up to current month/year (inclusive)
+                    const memberYear = parseInt(row['Join year']);
+                    const memberMonth = parseInt(row['Join month']);
                     
-                    return memberDate <= currentDate;
+                    // Include if member joined before current year
+                    if (memberYear < currentYear) return true;
+                    
+                    // Include if member joined in current year, up to and including current month
+                    if (memberYear === currentYear && memberMonth <= currentMonth) return true;
+                    
+                    return false;
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
