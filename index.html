@@ -638,14 +638,33 @@
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
-                console.log('Sample filtered records:', filteredData.slice(0, 3));
+                console.log('=== MEMBER TRACKING DEBUG ===');
+                console.log('Filtered data count:', filteredData.length);
+                
+                // Debug: Check for duplicate Object IDs in filtered data
+                const objectIds = filteredData.map(row => row['Object ID']).filter(Boolean);
+                const uniqueObjectIds = [...new Set(objectIds)];
+                console.log('Unique Object IDs in filtered data:', uniqueObjectIds.length);
+                console.log('Total Object IDs in filtered data:', objectIds.length);
+                
+                if (objectIds.length !== uniqueObjectIds.length) {
+                    console.warn('Duplicate Object IDs detected!');
+                    const duplicates = objectIds.filter((id, index) => objectIds.indexOf(id) !== index);
+                    console.log('Duplicate IDs:', [...new Set(duplicates)]);
+                }
                 
                 // Group by county and sector for positioning
                 const countyData = {};
+                let processedMembers = 0;
                 filteredData.forEach((row, index) => {
                     const county = row['Primary county'];
                     const sector = normalizeSector(row['Sector represented ']) || 'Unknown';
                     const objectId = row['Object ID'] || `fallback-${index}`;
+                    
+                    if (!county || county === '') {
+                        console.warn('Member with no county:', row);
+                        return; // Skip members without county
+                    }
                     
                     if (!countyData[county]) countyData[county] = {};
                     if (!countyData[county][sector]) countyData[county][sector] = [];
@@ -653,9 +672,11 @@
                     // Use Object ID to ensure no member is lost or duplicated
                     const memberWithId = { ...row, objectId: objectId };
                     countyData[county][sector].push(memberWithId);
+                    processedMembers++;
                 });
                 
                 console.log('County data groups:', Object.keys(countyData));
+                console.log('Processed members into groups:', processedMembers);
                 console.log('Detailed county breakdown:');
                 let totalMembersInGroups = 0;
                 Object.entries(countyData).forEach(([county, sectors]) => {
@@ -664,7 +685,7 @@
                     totalMembersInGroups += total;
                     console.log(`  ${county}: ${total} members (${sectorCounts.join(', ')})`);
                 });
-                console.log('Total members in groups: ' + totalMembersInGroups + ' (should match filtered data: ' + filteredData.length + ')');
+                console.log('Total members in groups: ' + totalMembersInGroups + ' (should match filtered: ' + filteredData.length + ', processed: ' + processedMembers + ')');
                 
                 // Create dots with consistent random positioning within county boundaries
                 let totalDotsAdded = 0;
