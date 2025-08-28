@@ -664,7 +664,7 @@
                     totalMembersInGroups += total;
                     console.log(`  ${county}: ${total} members (${sectorCounts.join(', ')})`);
                 });
-                console.log(`Total members in groups: ${totalMembersInGroups} (should match filtered data: ${filteredData.length})`;
+                console.log('Total members in groups: ' + totalMembersInGroups + ' (should match filtered data: ' + filteredData.length + ')');
                 
                 // Create dots with consistent random positioning within county boundaries
                 let totalDotsAdded = 0;
@@ -674,14 +674,12 @@
                     console.log(`Processing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
                     
                     Object.entries(sectors).forEach(([sector, members]) => {
-                        members.forEach((member, memberIndex) => {
-                            // Create a unique index for each member to handle duplicates
-                            const globalMemberIndex = totalDotsAdded;
-                            const position = getMemberPosition(member, county, globalMemberIndex);
+                        members.forEach((member) => {
+                            const position = getMemberPosition(member, county);
                             const joinYear = member['Join year'];
                             const dotColor = yearColors[joinYear] || '#666666';
                             
-                            console.log(`Creating dot ${globalMemberIndex + 1} for ${county}, year ${joinYear}, color: ${dotColor}`);
+                            console.log(`Creating dot ${totalDotsAdded + 1} for ${county}, ID ${member['Object ID'] || member.objectId}, year ${joinYear}, color: ${dotColor}`);
                             
                             if (!position || position.length !== 2 || isNaN(position[0]) || isNaN(position[1])) {
                                 console.warn('Invalid position for member:', member, 'position:', position);
@@ -709,15 +707,15 @@
                                     joinDate: `${member['Join year']}-${String(member['Join month']).padStart(2, '0')}`,
                                     joinYear: member['Join year'],
                                     joinMonth: member['Join month'],
-                                    memberIndex: globalMemberIndex
+                                    objectId: member['Object ID'] || member.objectId
                                 },
                                 popupTemplate: {
                                     title: "Member Information",
                                     content: `
+                                        <b>Member ID:</b> {objectId}<br>
                                         <b>County:</b> {county}<br>
                                         <b>Sector:</b> {sector}<br>
-                                        <b>Joined:</b> {joinDate}<br>
-                                        <b>Member #:</b> {memberIndex}
+                                        <b>Joined:</b> {joinDate}
                                     `
                                 }
                             });
