@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Central Coast Members - Dot Map</title>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.28/esri/themes/light/main.css">
+    <script src="https://js.arcgis.com/4.28/"></script>
+    <style>
+        html, body, #viewDiv {
+            padding: 0;
+            margin: 0;
+            height: 100%;
+            width: 100%;
+            font-family: 'Avenir Next', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        .time-controls {
+            margin-bottom: 15px;
+        }
+        
+        .time-slider {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .play-pause {
+            background: #0079c1;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        .play-pause:hover {
+            background: #005a87;
+        }
+        
+        .legend {
+            margin-top: 15px;
+            border-top: 1px solid #ddd;
+            padding-top: 15px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .stats {
+            margin-top: 15px;
+            border-top: 1px solid #ddd;
+            padding-top: 15px;
+            font-size: 12px;
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+        
+        .current-time {
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .year-filter {
+            margin-bottom: 10px;
+        }
+        
+        .year-filter select {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewDiv"></div>
+    <div class="controls">
+        <div class="year-filter">
+            <label>Filter by Year:</label>
+            <select id="yearSelect">
+                <option value="all">All Years</option>
+            </select>
+        </div>
+        
+        <div class="time-controls">
+            <button class="play-pause" id="playPause">Play</button>
+            <input type="range" class="time-slider" id="timeSlider" min="1" max="12" value="1" step="1">
+        </div>
+        
+        <div class="current-time" id="currentTime">January 2023</div>
+        
+        <div class="legend">
+            <h4 style="margin: 0 0 10px 0;">Sectors</h4>
+            <div id="legendItems"></div>
+        </div>
+        
+        <div class="stats">
+            <h4 style="margin: 0 0 10px 0;">Statistics</h4>
+            <div id="statsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/layers/FeatureLayer",
+            "esri/layers/GraphicsLayer",
+            "esri/Graphic",
+            "esri/geometry/Point",
+            "esri/symbols/SimpleMarkerSymbol",
+            "esri/renderers/UniqueValueRenderer"
+        ], function(Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Point, SimpleMarkerSymbol, UniqueValueRenderer) {
+
+            // CSV data will be loaded here
+            let csvData = [];
+            let currentMonth = 1;
+            let currentYear = 2023;
+            let isPlaying = false;
+            let playInterval;
+            let selectedYear = 'all';
+            
+            // County coordinates (approximate centers)
+            const countyCoords = {
+                'Monterey': [-121.8947, 36.2048],
+                'Santa Cruz': [-122.0308, 36.9741],
+                'Santa Barbara': [-119.7026, 34.4208],
+                'San Benito': [-121.0527, 36.8344],
+                'Ventura': [-119.2945, 34.2804],
+                'San Luis Obispo': [-120.6596, 35.2827]
+            };
+            
+            // Color scheme for sectors
+            const sectorColors = {};
+            const colorPalette = [
+                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+                '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+            ];
+            
+            const map = new Map({
+                basemap: "gray-vector"
+            });
+
+            const view = new MapView({
+                container: "viewDiv",
+                map: map,
+                center: [-120.5, 35.5],
+                zoom: 7
+            });
+
+            const graphicsLayer = new GraphicsLayer();
+            map.add(graphicsLayer);
+
+            // Load and parse CSV data
+            async function loadCSVData() {
+                try {
+                    const response = await window.fs.readFile('updated_centralcoast_members.csv', { encoding: 'utf8' });
+                    const lines = response.trim().split('\n');
+                    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                    
+                    csvData = lines.slice(1).map(line => {
+                        const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                        const row = {};
+                        headers.forEach((header, i) => {
+                            row[header] = values[i] || '';
+                        });
+                        
+                        // Clean and convert numeric fields
+                        if (row['Join year']) row['Join year'] = parseInt(row['Join year']);
+                        if (row['Join month']) row['Join month'] = parseInt(row['Join month']);
+                        
+                        return row;
+                    });
+                    
+                    console.log('Loaded', csvData.length, 'records');
+                    setupSectorColors();
+                    setupUI();
+                    updateVisualization();
+                } catch (error) {
+                    console.error('Error loading CSV:', error);
+                }
+            }
+            
+            function setupSectorColors() {
+                const sectors = [...new Set(csvData.map(row => 
+                    normalizeSector(row['Sector represented '])
+                ).filter(Boolean))];
+                
+                sectors.forEach((sector, i) => {
+                    sectorColors[sector] = colorPalette[i % colorPalette.length];
+                });
+            }
+            
+            function normalizeSector(sector) {
+                if (!sector || sector === '') return 'Unknown';
+                
+                const s = sector.toLowerCase().trim();
+                
+                // Group similar sectors
+                if (s.includes('govt') || s.includes('government')) return 'Government';
+                if (s.includes('nonprofit') || s.includes('non-profit')) return 'Nonprofit';
+                if (s.includes('farm') && !s.includes('market')) return 'Farming';
+                if (s.includes('restaurant') || s.includes('cafe')) return 'Food Service';
+                if (s.includes('technical assistance')) return 'Technical Assistance';
+                if (s.includes('fisherk') || s.includes('seafood') || s.includes('aquaculture')) return 'Fishing/Seafood';
+                if (s.includes('education') || s.includes('school') || s.includes('college')) return 'Education';
+                if (s.includes('market')) return 'Market/Retail';
+                if (s.includes('food hub') || s.includes('distributor')) return 'Distribution';
+                
+                return 'Other';
+            }
+            
+            function setupUI() {
+                // Setup year filter
+                const years = [...new Set(csvData.map(row => row['Join year']).filter(Boolean))].sort();
+                const yearSelect = document.getElementById('yearSelect');
+                years.forEach(year => {
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.text = year;
+                    yearSelect.appendChild(option);
+                });
+                
+                yearSelect.addEventListener('change', (e) => {
+                    selectedYear = e.target.value;
+                    updateVisualization();
+                });
+                
+                // Setup legend
+                const legendItems = document.getElementById('legendItems');
+                Object.entries(sectorColors).forEach(([sector, color]) => {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background-color: ${color}"></div>
+                        <span>${sector}</span>
+                    `;
+                    legendItems.appendChild(item);
+                });
+                
+                // Setup time controls
+                const playPauseBtn = document.getElementById('playPause');
+                const timeSlider = document.getElementById('timeSlider');
+                
+                playPauseBtn.addEventListener('click', togglePlay);
+                timeSlider.addEventListener('input', (e) => {
+                    currentMonth = parseInt(e.target.value);
+                    updateVisualization();
+                });
+            }
+            
+            function togglePlay() {
+                const btn = document.getElementById('playPause');
+                if (isPlaying) {
+                    clearInterval(playInterval);
+                    btn.textContent = 'Play';
+                    isPlaying = false;
+                } else {
+                    playInterval = setInterval(() => {
+                        currentMonth++;
+                        if (currentMonth > 12) {
+                            currentMonth = 1;
+                            // Move to next year if data exists
+                            const years = [...new Set(csvData.map(row => row['Join year']).filter(Boolean))].sort();
+                            const currentYearIndex = years.indexOf(currentYear);
+                            if (currentYearIndex < years.length - 1) {
+                                currentYear = years[currentYearIndex + 1];
+                            } else {
+                                currentYear = years[0]; // Loop back to first year
+                            }
+                        }
+                        
+                        document.getElementById('timeSlider').value = currentMonth;
+                        updateVisualization();
+                    }, 1000);
+                    btn.textContent = 'Pause';
+                    isPlaying = true;
+                }
+            }
+            
+            function updateVisualization() {
+                graphicsLayer.removeAll();
+                
+                // Filter data based on current time and year filter
+                let filteredData = csvData.filter(row => {
+                    if (selectedYear !== 'all' && row['Join year'] != selectedYear) return false;
+                    
+                    // Show cumulative data up to current month/year
+                    if (row['Join year'] < currentYear) return true;
+                    if (row['Join year'] === currentYear && row['Join month'] <= currentMonth) return true;
+                    
+                    return false;
+                });
+                
+                // Group by county and sector for positioning
+                const countyData = {};
+                filteredData.forEach(row => {
+                    const county = row['Primary county'];
+                    const sector = normalizeSector(row['Sector represented ']);
+                    
+                    if (!countyData[county]) countyData[county] = {};
+                    if (!countyData[county][sector]) countyData[county][sector] = [];
+                    countyData[county][sector].push(row);
+                });
+                
+                // Create dots with spiral positioning to avoid overlap
+                Object.entries(countyData).forEach(([county, sectors]) => {
+                    const baseCoords = countyCoords[county];
+                    if (!baseCoords) return;
+                    
+                    let totalCount = 0;
+                    Object.entries(sectors).forEach(([sector, members]) => {
+                        members.forEach((member, index) => {
+                            const position = getSpiralPosition(baseCoords, totalCount, 0.02);
+                            
+                            const graphic = new Graphic({
+                                geometry: new Point({
+                                    longitude: position[0],
+                                    latitude: position[1]
+                                }),
+                                symbol: new SimpleMarkerSymbol({
+                                    color: sectorColors[sector] || '#666',
+                                    size: 8,
+                                    outline: {
+                                        color: 'white',
+                                        width: 1
+                                    }
+                                }),
+                                attributes: {
+                                    county: county,
+                                    sector: sector,
+                                    joinDate: `${member['Join year']}-${String(member['Join month']).padStart(2, '0')}`
+                                }
+                            });
+                            
+                            graphicsLayer.add(graphic);
+                            totalCount++;
+                        });
+                    });
+                });
+                
+                // Update UI
+                updateCurrentTime();
+                updateStatistics(filteredData);
+            }
+            
+            function getSpiralPosition(center, index, spacing) {
+                if (index === 0) return center;
+                
+                const angle = index * 0.5;
+                const radius = Math.sqrt(index) * spacing;
+                
+                return [
+                    center[0] + radius * Math.cos(angle),
+                    center[1] + radius * Math.sin(angle)
+                ];
+            }
+            
+            function updateCurrentTime() {
+                const monthNames = [
+                    'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'
+                ];
+                
+                document.getElementById('currentTime').textContent = 
+                    `${monthNames[currentMonth - 1]} ${currentYear}`;
+            }
+            
+            function updateStatistics(data) {
+                const statsContent = document.getElementById('statsContent');
+                
+                // County statistics
+                const countyStats = {};
+                const sectorStats = {};
+                
+                data.forEach(row => {
+                    const county = row['Primary county'];
+                    const sector = normalizeSector(row['Sector represented ']);
+                    
+                    countyStats[county] = (countyStats[county] || 0) + 1;
+                    sectorStats[sector] = (sectorStats[sector] || 0) + 1;
+                });
+                
+                let statsHTML = `<div class="stat-row"><strong>Total Members: ${data.length}</strong></div><br>`;
+                
+                statsHTML += '<strong>By County:</strong><br>';
+                Object.entries(countyStats)
+                    .sort(([,a], [,b]) => b - a)
+                    .forEach(([county, count]) => {
+                        statsHTML += `<div class="stat-row"><span>${county}</span><span>${count}</span></div>`;
+                    });
+                
+                statsHTML += '<br><strong>By Sector:</strong><br>';
+                Object.entries(sectorStats)
+                    .sort(([,a], [,b]) => b - a)
+                    .forEach(([sector, count]) => {
+                        statsHTML += `<div class="stat-row"><span>${sector}</span><span>${count}</span></div>`;
+                    });
+                
+                statsContent.innerHTML = statsHTML;
+            }
+            
+            // Initialize the application
+            view.when(() => {
+                loadCSVData();
+            });
+        });
+    </script>
+</body>
+</html>
