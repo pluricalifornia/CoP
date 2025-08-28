@@ -138,9 +138,11 @@
             "esri/layers/GraphicsLayer",
             "esri/Graphic",
             "esri/geometry/Point",
+            "esri/geometry/Polygon",
             "esri/symbols/SimpleMarkerSymbol",
+            "esri/symbols/SimpleFillSymbol",
             "esri/renderers/UniqueValueRenderer"
-        ], function(Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Point, SimpleMarkerSymbol, UniqueValueRenderer) {
+        ], function(Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Point, Polygon, SimpleMarkerSymbol, SimpleFillSymbol, UniqueValueRenderer) {
 
             // CSV data will be loaded here
             let csvData = [];
@@ -183,11 +185,14 @@
             const graphicsLayer = new GraphicsLayer();
             map.add(graphicsLayer);
 
-            // Load and parse CSV data
+            // Load and parse CSV data from GitHub
             async function loadCSVData() {
                 try {
-                    const response = await window.fs.readFile('updated_centralcoast_members.csv', { encoding: 'utf8' });
-                    const lines = response.trim().split('\n');
+                    const csvUrl = 'https://raw.githubusercontent.com/pluricalifornia/CoP/main/data/centralcoast_members.csv';
+                    const response = await fetch(csvUrl);
+                    const csvText = await response.text();
+                    
+                    const lines = csvText.trim().split('\n');
                     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
                     
                     csvData = lines.slice(1).map(line => {
@@ -205,12 +210,97 @@
                     });
                     
                     console.log('Loaded', csvData.length, 'records');
+                    await loadCountyBoundaries();
                     setupSectorColors();
                     setupUI();
                     updateVisualization();
                 } catch (error) {
                     console.error('Error loading CSV:', error);
                 }
+            }
+
+            // Load California counties GeoJSON
+            async function loadCountyBoundaries() {
+                try {
+                    const countiesUrl = 'https://raw.githubusercontent.com/pluricalifornia/CoP/main/data/CA_COUNTIES.json';
+                    const response = await fetch(countiesUrl);
+                    const countiesData = await response.json();
+                    
+                    // Create feature layer for county boundaries
+                    const countiesLayer = new FeatureLayer({
+                        source: countiesData.features.filter(feature => {
+                            const countyName = feature.properties.NAME || feature.properties.COUNTY;
+                            return ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'].includes(countyName);
+                        }).map((feature, index) => {
+                            return new Graphic({
+                                geometry: feature.geometry.type === 'Polygon' ? 
+                                    new Polygon({
+                                        rings: feature.geometry.coordinates,
+                                        spatialReference: { wkid: 4326 }
+                                    }) : null,
+                                attributes: {
+                                    OBJECTID: index + 1,
+                                    NAME: feature.properties.NAME || feature.properties.COUNTY,
+                                    COUNTY: feature.properties.NAME || feature.properties.COUNTY
+                                }
+                            });
+                        }).filter(graphic => graphic.geometry !== null),
+                        objectIdField: "OBJECTID",
+                        fields: [
+                            { name: "OBJECTID", type: "oid" },
+                            { name: "NAME", type: "string" },
+                            { name: "COUNTY", type: "string" }
+                        ],
+                        renderer: {
+                            type: "simple",
+                            symbol: {
+                                type: "simple-fill",
+                                color: [200, 200, 200, 0.1], // Very light fill
+                                outline: {
+                                    color: [100, 100, 100, 0.8],
+                                    width: 2
+                                }
+                            }
+                        },
+                        popupTemplate: {
+                            title: "{NAME} County",
+                            content: "Central Coast County: {NAME}"
+                        }
+                    });
+                    
+                    map.add(countiesLayer, 0); // Add as base layer
+                    
+                    // Update county coordinates based on actual geometry centroids
+                    updateCountyCoordinates(countiesData);
+                    
+                } catch (error) {
+                    console.error('Error loading county boundaries:', error);
+                    // Fallback to hardcoded coordinates if counties can't be loaded
+                }
+            }
+
+            // Update county coordinates from GeoJSON centroids
+            function updateCountyCoordinates(countiesData) {
+                const centralCoastCounties = ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'];
+                
+                countiesData.features.forEach(feature => {
+                    const countyName = feature.properties.NAME || feature.properties.COUNTY;
+                    
+                    if (centralCoastCounties.includes(countyName)) {
+                        // Calculate centroid for polygon
+                        const coordinates = feature.geometry.coordinates[0];
+                        let sumLng = 0, sumLat = 0;
+                        coordinates.forEach(coord => {
+                            sumLng += coord[0];
+                            sumLat += coord[1];
+                        });
+                        
+                        countyCoords[countyName] = [
+                            sumLng / coordinates.length,
+                            sumLat / coordinates.length
+                        ];
+                    }
+                });
             }
             
             function setupSectorColors() {
