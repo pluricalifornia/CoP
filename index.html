@@ -170,12 +170,12 @@
                 2025: '#33a02c'  // Green
             };
             const countyColors = {
-                'Monterey': '#ffffcc',
-                'Santa Cruz': '#c2e699', 
-                'Santa Barbara': '#78c679',
-                'San Benito': '#31a354',
-                'Ventura': '#006837',
-                'San Luis Obispo': '#238443'
+                'Monterey': '#2E86AB',        // Ocean blue
+                'Santa Cruz': '#A23B72',      // Deep rose
+                'Santa Barbara': '#F18F01',   // Warm orange
+                'San Benito': '#C73E1D',      // Brick red
+                'Ventura': '#5D737E',         // Blue gray
+                'San Luis Obispo': '#7A4F9A'  // Deep purple
             };
             
             const colorPalette = [
@@ -454,11 +454,13 @@
             }
 
             // Get or create consistent position for a member
-            function getMemberPosition(member, county) {
-                const memberKey = `${county}-${member['Join year']}-${member['Join month']}-${JSON.stringify(member)}`;
+            function getMemberPosition(member, county, memberIndex) {
+                // Create a more unique key that includes the member index to handle duplicates
+                const memberKey = `${county}-${member['Join year']}-${member['Join month']}-${member['Sector represented '] || 'unknown'}-${memberIndex}`;
                 
                 if (!memberPositions[memberKey]) {
                     memberPositions[memberKey] = getRandomPointInCounty(county);
+                    console.log(`Generated new position for member key: ${memberKey}`);
                 }
                 
                 return memberPositions[memberKey];
@@ -660,15 +662,17 @@
                     console.log(`Processing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
                     
                     Object.entries(sectors).forEach(([sector, members]) => {
-                        members.forEach((member, index) => {
-                            const position = getMemberPosition(member, county);
+                        members.forEach((member, memberIndex) => {
+                            // Create a unique index for each member to handle duplicates
+                            const globalMemberIndex = totalDotsAdded;
+                            const position = getMemberPosition(member, county, globalMemberIndex);
                             const joinYear = member['Join year'];
                             const dotColor = yearColors[joinYear] || '#666666';
                             
-                            console.log(`Creating dot for ${county}, year ${joinYear}, color: ${dotColor}, position:`, position);
+                            console.log(`Creating dot ${globalMemberIndex + 1} for ${county}, year ${joinYear}, color: ${dotColor}`);
                             
                             if (!position || position.length !== 2 || isNaN(position[0]) || isNaN(position[1])) {
-                                console.warn('Invalid position for member:', member);
+                                console.warn('Invalid position for member:', member, 'position:', position);
                                 failedPlacements++;
                                 return;
                             }
@@ -692,14 +696,16 @@
                                     sector: sector,
                                     joinDate: `${member['Join year']}-${String(member['Join month']).padStart(2, '0')}`,
                                     joinYear: member['Join year'],
-                                    joinMonth: member['Join month']
+                                    joinMonth: member['Join month'],
+                                    memberIndex: globalMemberIndex
                                 },
                                 popupTemplate: {
                                     title: "Member Information",
                                     content: `
                                         <b>County:</b> {county}<br>
                                         <b>Sector:</b> {sector}<br>
-                                        <b>Joined:</b> {joinDate}
+                                        <b>Joined:</b> {joinDate}<br>
+                                        <b>Member #:</b> {memberIndex}
                                     `
                                 }
                             });
