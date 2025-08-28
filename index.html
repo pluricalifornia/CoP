@@ -784,35 +784,18 @@
                     `${monthNames[currentMonth - 1]} ${currentYear}`;
             }
             
-            function updateStatistics(data) {
+            function updateStatistics(countyStats) {
                 const statsContent = document.getElementById('statsContent');
                 
-                // County statistics
-                const countyStats = {};
-                const sectorStats = {};
+                const totalMembers = Object.values(countyStats).reduce((sum, count) => sum + count, 0);
                 
-                data.forEach(row => {
-                    const county = row['Primary county'];
-                    const sector = normalizeSector(row['Sector represented ']);
-                    
-                    countyStats[county] = (countyStats[county] || 0) + 1;
-                    sectorStats[sector] = (sectorStats[sector] || 0) + 1;
-                });
-                
-                let statsHTML = `<div class="stat-row"><strong>Total Members: ${data.length}</strong></div><br>`;
+                let statsHTML = `<div class="stat-row"><strong>Total Members: ${totalMembers}</strong></div><br>`;
                 
                 statsHTML += '<strong>By County:</strong><br>';
                 Object.entries(countyStats)
                     .sort(([,a], [,b]) => b - a)
                     .forEach(([county, count]) => {
                         statsHTML += `<div class="stat-row"><span>${county}</span><span>${count}</span></div>`;
-                    });
-                
-                statsHTML += '<br><strong>By Sector:</strong><br>';
-                Object.entries(sectorStats)
-                    .sort(([,a], [,b]) => b - a)
-                    .forEach(([sector, count]) => {
-                        statsHTML += `<div class="stat-row"><span>${sector}</span><span>${count}</span></div>`;
                     });
                 
                 statsContent.innerHTML = statsHTML;
