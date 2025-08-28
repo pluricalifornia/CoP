@@ -162,8 +162,22 @@
                 'San Luis Obispo': [-120.6596, 35.2827]
             };
             
-            // Color scheme for sectors
+            // Color schemes
             const sectorColors = {};
+            const yearColors = {
+                2023: '#e31a1c', // Red
+                2024: '#1f78b4', // Blue  
+                2025: '#33a02c'  // Green
+            };
+            const countyColors = {
+                'Monterey': '#ffffcc',
+                'Santa Cruz': '#c2e699', 
+                'Santa Barbara': '#78c679',
+                'San Benito': '#31a354',
+                'Ventura': '#006837',
+                'San Luis Obispo': '#238443'
+            };
+            
             const colorPalette = [
                 '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                 '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
@@ -192,10 +206,14 @@
                     const response = await fetch(csvUrl);
                     const csvText = await response.text();
                     
+                    console.log('Raw CSV first 500 characters:', csvText.substring(0, 500));
+                    
                     const lines = csvText.trim().split('\n');
                     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
                     
-                    csvData = lines.slice(1).map(line => {
+                    console.log('CSV Headers:', headers);
+                    
+                    csvData = lines.slice(1).map((line, index) => {
                         const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
                         const row = {};
                         headers.forEach((header, i) => {
@@ -206,10 +224,23 @@
                         if (row['Join year']) row['Join year'] = parseInt(row['Join year']);
                         if (row['Join month']) row['Join month'] = parseInt(row['Join month']);
                         
+                        // Debug first few rows
+                        if (index < 5) {
+                            console.log(`Row ${index}:`, row);
+                        }
+                        
                         return row;
                     });
                     
-                    console.log('Loaded', csvData.length, 'records');
+                    console.log('Total loaded records:', csvData.length);
+                    console.log('Sample record with all fields:', csvData[0]);
+                    
+                    // Check for data issues
+                    const missingCounty = csvData.filter(row => !row['Primary county'] || row['Primary county'] === '');
+                    const missingYear = csvData.filter(row => !row['Join year'] || isNaN(row['Join year']));
+                    console.log('Records missing county:', missingCounty.length);
+                    console.log('Records missing/invalid year:', missingYear.length);
+                    
                     await loadCountyBoundaries();
                     setupSectorColors();
                     setupUI();
@@ -266,7 +297,7 @@
                                             COUNTY: countyName
                                         },
                                         symbol: new SimpleFillSymbol({
-                                            color: [200, 200, 200, 0.1],
+                                            color: [...hexToRgb(countyColors[countyName] || '#cccccc'), 0.3], // County-specific color
                                             outline: {
                                                 color: [100, 100, 100, 0.8],
                                                 width: 2
@@ -278,6 +309,7 @@
                                         }
                                     });
                                     
+                                    console.log(`Created county graphic for ${countyName} with color:`, countyColors[countyName]);
                                     countyGraphics.push(graphic);
                                     graphicsLayer.add(graphic);
                                 }
@@ -362,10 +394,21 @@
                 return inside;
             }
 
+            // Convert hex color to RGB array
+            function hexToRgb(hex) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? [
+                    parseInt(result[1], 16),
+                    parseInt(result[2], 16),
+                    parseInt(result[3], 16)
+                ] : [200, 200, 200];
+            }
+
             // Generate random point within county boundary using point-in-polygon testing
             function getRandomPointInCounty(countyName) {
                 const boundary = countyBoundaries[countyName];
                 if (!boundary || boundary.length === 0) {
+                    console.warn('No boundary data for county:', countyName);
                     // Fallback to centroid with small random offset
                     const center = countyCoords[countyName];
                     if (center) {
@@ -403,8 +446,9 @@
                         return point;
                     }
                     
-                } while (attempts < 100); // Limit attempts to prevent infinite loops
+                } while (attempts < 500); // Increased attempts to find valid points
                 
+                console.warn(`Could not find valid point in ${countyName} after 500 attempts, using centroid`);
                 // If we can't find a point inside, fall back to centroid
                 return countyCoords[countyName] || [-120.5, 35.5];
             }
@@ -487,8 +531,27 @@
                     updateVisualization();
                 });
                 
-                // Setup legend
+                // Setup legend for years
                 const legendItems = document.getElementById('legendItems');
+                
+                // Year legend
+                legendItems.innerHTML = '<strong>By Join Year:</strong><br>';
+                Object.entries(yearColors).forEach(([year, color]) => {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background-color: ${color}"></div>
+                        <span>${year}</span>
+                    `;
+                    legendItems.appendChild(item);
+                });
+                
+                // Add separator
+                const separator = document.createElement('div');
+                separator.innerHTML = '<br><strong>By Sector:</strong><br>';
+                legendItems.appendChild(separator);
+                
+                // Sector legend
                 Object.entries(sectorColors).forEach(([sector, color]) => {
                     const item = document.createElement('div');
                     item.className = 'legend-item';
@@ -544,10 +607,21 @@
                 const memberGraphics = graphicsLayer.graphics.filter(g => g.attributes && g.attributes.county);
                 graphicsLayer.removeMany(memberGraphics.toArray());
                 
-                console.log('Updating visualization for:', `${currentMonth}/${currentYear}`);
+                console.log('=== VISUALIZATION UPDATE ===');
+                console.log('Current time:', `${currentMonth}/${currentYear}`);
+                console.log('Selected year filter:', selectedYear);
+                console.log('Total CSV records:', csvData.length);
                 
                 // Filter data based on current time and year filter
                 let filteredData = csvData.filter(row => {
+                    const hasCounty = row['Primary county'] && row['Primary county'] !== '';
+                    const hasYear = row['Join year'] && !isNaN(row['Join year']);
+                    const hasMonth = row['Join month'] && !isNaN(row['Join month']);
+                    
+                    if (!hasCounty || !hasYear || !hasMonth) {
+                        return false;
+                    }
+                    
                     if (selectedYear !== 'all' && row['Join year'] != selectedYear) return false;
                     
                     // Show cumulative data up to current month/year
@@ -558,6 +632,7 @@
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
+                console.log('Sample filtered records:', filteredData.slice(0, 3));
                 
                 // Group by county and sector for positioning
                 const countyData = {};
@@ -571,15 +646,32 @@
                 });
                 
                 console.log('County data groups:', Object.keys(countyData));
+                console.log('County data breakdown:');
+                Object.entries(countyData).forEach(([county, sectors]) => {
+                    const total = Object.values(sectors).reduce((sum, members) => sum + members.length, 0);
+                    console.log(`  ${county}: ${total} members`);
+                });
                 
                 // Create dots with consistent random positioning within county boundaries
                 let totalDotsAdded = 0;
+                let failedPlacements = 0;
+                
                 Object.entries(countyData).forEach(([county, sectors]) => {
-                    console.log(`Placing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
+                    console.log(`Processing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
                     
                     Object.entries(sectors).forEach(([sector, members]) => {
                         members.forEach((member, index) => {
                             const position = getMemberPosition(member, county);
+                            const joinYear = member['Join year'];
+                            const dotColor = yearColors[joinYear] || '#666666';
+                            
+                            console.log(`Creating dot for ${county}, year ${joinYear}, color: ${dotColor}, position:`, position);
+                            
+                            if (!position || position.length !== 2 || isNaN(position[0]) || isNaN(position[1])) {
+                                console.warn('Invalid position for member:', member);
+                                failedPlacements++;
+                                return;
+                            }
                             
                             const graphic = new Graphic({
                                 geometry: new Point({
@@ -588,11 +680,11 @@
                                     spatialReference: { wkid: 4326 }
                                 }),
                                 symbol: new SimpleMarkerSymbol({
-                                    color: sectorColors[sector] || '#666',
-                                    size: 8,
+                                    color: dotColor,
+                                    size: 10,
                                     outline: {
-                                        color: 'white',
-                                        width: 1
+                                        color: [255, 255, 255, 1], // White outline
+                                        width: 2
                                     }
                                 }),
                                 attributes: {
@@ -619,6 +711,8 @@
                 });
                 
                 console.log('Total dots added:', totalDotsAdded);
+                console.log('Failed placements:', failedPlacements);
+                console.log('=== END VISUALIZATION UPDATE ===');
                 
                 // Update UI
                 updateCurrentTime();
