@@ -226,49 +226,63 @@
                     const response = await fetch(countiesUrl);
                     const countiesData = await response.json();
                     
-                    // Create feature layer for county boundaries
-                    const countiesLayer = new FeatureLayer({
-                        source: countiesData.features.filter(feature => {
-                            const countyName = feature.properties.NAME || feature.properties.COUNTY;
-                            return ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'].includes(countyName);
-                        }).map((feature, index) => {
-                            return new Graphic({
-                                geometry: feature.geometry.type === 'Polygon' ? 
-                                    new Polygon({
+                    console.log('Loaded counties data, total features:', countiesData.features.length);
+                    
+                    // Filter for Central Coast counties and create graphics
+                    const centralCoastCounties = ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'];
+                    const countyGraphics = [];
+                    
+                    countiesData.features.forEach((feature, index) => {
+                        const countyName = feature.properties.NAME;
+                        if (centralCoastCounties.includes(countyName)) {
+                            console.log('Processing county:', countyName);
+                            
+                            try {
+                                let geometry;
+                                if (feature.geometry.type === 'Polygon') {
+                                    geometry = new Polygon({
                                         rings: feature.geometry.coordinates,
-                                        spatialReference: { wkid: 4326 }
-                                    }) : null,
-                                attributes: {
-                                    OBJECTID: index + 1,
-                                    NAME: feature.properties.NAME || feature.properties.COUNTY,
-                                    COUNTY: feature.properties.NAME || feature.properties.COUNTY
+                                        spatialReference: { wkid: 3857 } // Use the correct spatial reference
+                                    });
+                                } else if (feature.geometry.type === 'MultiPolygon') {
+                                    // Handle MultiPolygon by taking the first polygon
+                                    geometry = new Polygon({
+                                        rings: feature.geometry.coordinates[0],
+                                        spatialReference: { wkid: 3857 }
+                                    });
                                 }
-                            });
-                        }).filter(graphic => graphic.geometry !== null),
-                        objectIdField: "OBJECTID",
-                        fields: [
-                            { name: "OBJECTID", type: "oid" },
-                            { name: "NAME", type: "string" },
-                            { name: "COUNTY", type: "string" }
-                        ],
-                        renderer: {
-                            type: "simple",
-                            symbol: {
-                                type: "simple-fill",
-                                color: [200, 200, 200, 0.1], // Very light fill
-                                outline: {
-                                    color: [100, 100, 100, 0.8],
-                                    width: 2
+                                
+                                if (geometry) {
+                                    const graphic = new Graphic({
+                                        geometry: geometry,
+                                        attributes: {
+                                            OBJECTID: index + 1,
+                                            NAME: countyName,
+                                            COUNTY: countyName
+                                        },
+                                        symbol: new SimpleFillSymbol({
+                                            color: [200, 200, 200, 0.1],
+                                            outline: {
+                                                color: [100, 100, 100, 0.8],
+                                                width: 2
+                                            }
+                                        }),
+                                        popupTemplate: {
+                                            title: "{NAME} County",
+                                            content: "Central Coast County: {NAME}"
+                                        }
+                                    });
+                                    
+                                    countyGraphics.push(graphic);
+                                    graphicsLayer.add(graphic);
                                 }
+                            } catch (geomError) {
+                                console.error('Error processing geometry for', countyName, geomError);
                             }
-                        },
-                        popupTemplate: {
-                            title: "{NAME} County",
-                            content: "Central Coast County: {NAME}"
                         }
                     });
                     
-                    map.add(countiesLayer, 0); // Add as base layer
+                    console.log('Added county graphics:', countyGraphics.length);
                     
                     // Update county coordinates based on actual geometry centroids
                     updateCountyCoordinates(countiesData);
@@ -284,23 +298,21 @@
                 const centralCoastCounties = ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'];
                 
                 countiesData.features.forEach(feature => {
-                    const countyName = feature.properties.NAME || feature.properties.COUNTY;
+                    const countyName = feature.properties.NAME;
                     
                     if (centralCoastCounties.includes(countyName)) {
-                        // Calculate centroid for polygon
-                        const coordinates = feature.geometry.coordinates[0];
-                        let sumLng = 0, sumLat = 0;
-                        coordinates.forEach(coord => {
-                            sumLng += coord[0];
-                            sumLat += coord[1];
-                        });
+                        // Use the provided centroid coordinates (INTPTLAT, INTPTLON)
+                        const lat = parseFloat(feature.properties.INTPTLAT);
+                        const lng = parseFloat(feature.properties.INTPTLON);
                         
-                        countyCoords[countyName] = [
-                            sumLng / coordinates.length,
-                            sumLat / coordinates.length
-                        ];
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            countyCoords[countyName] = [lng, lat];
+                            console.log('Updated coordinates for', countyName, ':', [lng, lat]);
+                        }
                     }
                 });
+                
+                console.log('Final county coordinates:', countyCoords);
             }
             
             function setupSectorColors() {
@@ -401,7 +413,11 @@
             }
             
             function updateVisualization() {
-                graphicsLayer.removeAll();
+                // Remove only the member dots, keep county boundaries
+                const memberGraphics = graphicsLayer.graphics.filter(g => g.attributes && g.attributes.county);
+                graphicsLayer.removeMany(memberGraphics.toArray());
+                
+                console.log('Updating visualization for:', `${currentMonth}/${currentYear}`);
                 
                 // Filter data based on current time and year filter
                 let filteredData = csvData.filter(row => {
@@ -414,6 +430,8 @@
                     return false;
                 });
                 
+                console.log('Filtered data count:', filteredData.length);
+                
                 // Group by county and sector for positioning
                 const countyData = {};
                 filteredData.forEach(row => {
@@ -425,24 +443,31 @@
                     countyData[county][sector].push(row);
                 });
                 
+                console.log('County data groups:', Object.keys(countyData));
+                
                 // Create dots with spiral positioning to avoid overlap
+                let totalDotsAdded = 0;
                 Object.entries(countyData).forEach(([county, sectors]) => {
                     const baseCoords = countyCoords[county];
-                    if (!baseCoords) return;
+                    if (!baseCoords) {
+                        console.warn('No coordinates found for county:', county);
+                        return;
+                    }
                     
-                    let totalCount = 0;
+                    let countyDotIndex = 0;
                     Object.entries(sectors).forEach(([sector, members]) => {
                         members.forEach((member, index) => {
-                            const position = getSpiralPosition(baseCoords, totalCount, 0.02);
+                            const position = getSpiralPosition(baseCoords, countyDotIndex, 0.01);
                             
                             const graphic = new Graphic({
                                 geometry: new Point({
                                     longitude: position[0],
-                                    latitude: position[1]
+                                    latitude: position[1],
+                                    spatialReference: { wkid: 4326 }
                                 }),
                                 symbol: new SimpleMarkerSymbol({
                                     color: sectorColors[sector] || '#666',
-                                    size: 8,
+                                    size: 10,
                                     outline: {
                                         color: 'white',
                                         width: 1
@@ -451,15 +476,28 @@
                                 attributes: {
                                     county: county,
                                     sector: sector,
-                                    joinDate: `${member['Join year']}-${String(member['Join month']).padStart(2, '0')}`
+                                    joinDate: `${member['Join year']}-${String(member['Join month']).padStart(2, '0')}`,
+                                    joinYear: member['Join year'],
+                                    joinMonth: member['Join month']
+                                },
+                                popupTemplate: {
+                                    title: "Member Information",
+                                    content: `
+                                        <b>County:</b> {county}<br>
+                                        <b>Sector:</b> {sector}<br>
+                                        <b>Joined:</b> {joinDate}
+                                    `
                                 }
                             });
                             
                             graphicsLayer.add(graphic);
-                            totalCount++;
+                            countyDotIndex++;
+                            totalDotsAdded++;
                         });
                     });
                 });
+                
+                console.log('Total dots added:', totalDotsAdded);
                 
                 // Update UI
                 updateCurrentTime();
