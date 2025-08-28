@@ -455,12 +455,16 @@
 
             // Get or create consistent position for a member
             function getMemberPosition(member, county, memberIndex) {
-                // Create a more unique key that includes the member index to handle duplicates
-                const memberKey = `${county}-${member['Join year']}-${member['Join month']}-${member['Sector represented '] || 'unknown'}-${memberIndex}`;
+                // Create a deterministic key based on member data that won't change
+                const memberKey = `${county}-${member['Join year']}-${member['Join month']}-${member['Sector represented '] || 'unknown'}-${member['Email preference'] || ''}-${memberIndex}`;
                 
                 if (!memberPositions[memberKey]) {
+                    // This is a new member appearing for the first time - generate random position
                     memberPositions[memberKey] = getRandomPointInCounty(county);
-                    console.log(`Generated new position for member key: ${memberKey}`);
+                    console.log(`New member placed at random position in ${county}: ${memberKey}`);
+                } else {
+                    // This member already exists - use their cached position
+                    console.log(`Using cached position for existing member in ${county}: ${memberKey}`);
                 }
                 
                 return memberPositions[memberKey];
@@ -627,10 +631,10 @@
                     if (selectedYear !== 'all' && row['Join year'] != selectedYear) return false;
                     
                     // Show cumulative data up to current month/year
-                    if (row['Join year'] < currentYear) return true;
-                    if (row['Join year'] === currentYear && row['Join month'] <= currentMonth) return true;
+                    const memberDate = new Date(row['Join year'], row['Join month'] - 1, 1);
+                    const currentDate = new Date(currentYear, currentMonth - 1, 1);
                     
-                    return false;
+                    return memberDate <= currentDate;
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
