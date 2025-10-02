@@ -531,10 +531,10 @@
                 });
                 
                 const playPauseBtn = document.getElementById('playPause');
-                const timeSlider = document.getElementById('timeSlider');
+                const timeSliderElement = document.getElementById('timeSlider');
                 
                 playPauseBtn.addEventListener('click', togglePlay);
-                timeSlider.addEventListener('input', (e) => {
+                timeSliderElement.addEventListener('input', (e) => {
                     const sliderValue = parseInt(e.target.value);
                     // Convert slider value to year/month
                     const monthsSinceStart = sliderValue - 1;
