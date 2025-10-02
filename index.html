@@ -150,6 +150,9 @@
             let isPlaying = false;
             let playInterval;
             let selectedYear = 'all';
+            let minYear = 2023;
+            let maxYear = 2025;
+            let maxMonth = 12;
             
             const countyCoords = {
                 'Monterey': [-121.8947, 36.2048],
@@ -219,6 +222,22 @@
                     });
                     
                     console.log('Total loaded records:', csvData.length);
+                    
+                    // Calculate actual date range from data
+                    const years = csvData.map(r => r['Join year']).filter(y => y && !isNaN(y));
+                    const validRecords = csvData.filter(r => r['Join year'] && r['Join month']);
+                    
+                    if (years.length > 0) {
+                        minYear = Math.min(...years);
+                        maxYear = Math.max(...years);
+                        
+                        // Find the latest month in the latest year
+                        const latestYearRecords = validRecords.filter(r => r['Join year'] === maxYear);
+                        const months = latestYearRecords.map(r => r['Join month']);
+                        maxMonth = months.length > 0 ? Math.max(...months) : 12;
+                    }
+                    
+                    console.log('Date range:', `${minYear}/1 to ${maxYear}/${maxMonth}`);
                     
                     await loadCountyBoundaries();
                     setupSectorColors();
@@ -476,6 +495,14 @@
                     updateVisualization();
                 });
                 
+                // Update time slider to cover full date range
+                const timeSlider = document.getElementById('timeSlider');
+                const totalMonths = (maxYear - minYear) * 12 + maxMonth;
+                timeSlider.max = totalMonths;
+                timeSlider.value = 1;
+                
+                console.log(`Timeline covers ${totalMonths} months from ${minYear}/1 to ${maxYear}/${maxMonth}`);
+                
                 const legendItems = document.getElementById('legendItems');
                 
                 legendItems.innerHTML = '<strong>By Join Year:</strong><br>';
@@ -508,7 +535,11 @@
                 
                 playPauseBtn.addEventListener('click', togglePlay);
                 timeSlider.addEventListener('input', (e) => {
-                    currentMonth = parseInt(e.target.value);
+                    const sliderValue = parseInt(e.target.value);
+                    // Convert slider value to year/month
+                    const monthsSinceStart = sliderValue - 1;
+                    currentYear = minYear + Math.floor(monthsSinceStart / 12);
+                    currentMonth = (monthsSinceStart % 12) + 1;
                     updateVisualization();
                 });
             }
@@ -524,16 +555,20 @@
                         currentMonth++;
                         if (currentMonth > 12) {
                             currentMonth = 1;
-                            const years = [...new Set(csvData.map(row => row['Join year']).filter(Boolean))].sort();
-                            const currentYearIndex = years.indexOf(currentYear);
-                            if (currentYearIndex < years.length - 1) {
-                                currentYear = years[currentYearIndex + 1];
-                            } else {
-                                currentYear = years[0];
-                            }
+                            currentYear++;
                         }
                         
-                        document.getElementById('timeSlider').value = currentMonth;
+                        // Stop at the end of data
+                        if (currentYear > maxYear || (currentYear === maxYear && currentMonth > maxMonth)) {
+                            clearInterval(playInterval);
+                            btn.textContent = 'Play';
+                            isPlaying = false;
+                            return;
+                        }
+                        
+                        // Update slider position
+                        const monthsSinceStart = (currentYear - minYear) * 12 + currentMonth;
+                        document.getElementById('timeSlider').value = monthsSinceStart;
                         updateVisualization();
                     }, 1000);
                     btn.textContent = 'Pause';
@@ -566,6 +601,22 @@
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
+                
+                // Debug: Show what we're filtering
+                if (currentYear === 2025 && currentMonth === 6) {
+                    console.log('=== JUNE 2025 DEBUG ===');
+                    const june2025Members = csvData.filter(r => r['Join year'] === 2025 && r['Join month'] === 6);
+                    console.log('Members who joined in June 2025:', june2025Members.length);
+                    
+                    const after2025 = csvData.filter(r => r['Join year'] === 2025 && r['Join month'] > 6);
+                    console.log('Members who joined after June 2025:', after2025.length);
+                    console.log('Sample of post-June members:', after2025.slice(0, 5).map(r => ({
+                        id: r['Object ID'],
+                        county: r['Primary county'],
+                        year: r['Join year'],
+                        month: r['Join month']
+                    })));
+                }
                 
                 const countyData = {};
                 filteredData.forEach((row, index) => {
