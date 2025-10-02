@@ -144,7 +144,6 @@
             "esri/renderers/UniqueValueRenderer"
         ], function(Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Point, Polygon, SimpleMarkerSymbol, SimpleFillSymbol, UniqueValueRenderer) {
 
-            // CSV data will be loaded here
             let csvData = [];
             let currentMonth = 1;
             let currentYear = 2023;
@@ -152,7 +151,6 @@
             let playInterval;
             let selectedYear = 'all';
             
-            // County coordinates (approximate centers)
             const countyCoords = {
                 'Monterey': [-121.8947, 36.2048],
                 'Santa Cruz': [-122.0308, 36.9741],
@@ -162,20 +160,19 @@
                 'San Luis Obispo': [-120.6596, 35.2827]
             };
             
-            // Color schemes
             const sectorColors = {};
             const yearColors = {
-                2023: '#e31a1c', // Red
-                2024: '#1f78b4', // Blue  
-                2025: '#33a02c'  // Green
+                2023: '#e31a1c',
+                2024: '#1f78b4',
+                2025: '#33a02c'
             };
             const countyColors = {
-                'Monterey': '#2E86AB',        // Ocean blue
-                'Santa Cruz': '#A23B72',      // Deep rose
-                'Santa Barbara': '#F18F01',   // Warm orange
-                'San Benito': '#C73E1D',      // Brick red
-                'Ventura': '#5D737E',         // Blue gray
-                'San Luis Obispo': '#7A4F9A'  // Deep purple
+                'Monterey': '#2E86AB',
+                'Santa Cruz': '#A23B72',
+                'Santa Barbara': '#F18F01',
+                'San Benito': '#C73E1D',
+                'Ventura': '#5D737E',
+                'San Luis Obispo': '#7A4F9A'
             };
             
             const colorPalette = [
@@ -199,47 +196,29 @@
             const graphicsLayer = new GraphicsLayer();
             map.add(graphicsLayer);
 
-            // Load and parse CSV data from GitHub
             async function loadCSVData() {
                 try {
                     const csvUrl = 'https://raw.githubusercontent.com/pluricalifornia/CoP/main/data/centralcoast_members.csv';
                     const response = await fetch(csvUrl);
                     const csvText = await response.text();
                     
-                    console.log('Raw CSV first 500 characters:', csvText.substring(0, 500));
-                    
                     const lines = csvText.trim().split('\n');
                     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
                     
-                    console.log('CSV Headers:', headers);
-                    
-                    csvData = lines.slice(1).map((line, index) => {
+                    csvData = lines.slice(1).map((line) => {
                         const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
                         const row = {};
                         headers.forEach((header, i) => {
                             row[header] = values[i] || '';
                         });
                         
-                        // Clean and convert numeric fields
                         if (row['Join year']) row['Join year'] = parseInt(row['Join year']);
                         if (row['Join month']) row['Join month'] = parseInt(row['Join month']);
-                        
-                        // Debug first few rows
-                        if (index < 5) {
-                            console.log(`Row ${index}:`, row);
-                        }
                         
                         return row;
                     });
                     
                     console.log('Total loaded records:', csvData.length);
-                    console.log('Sample record with all fields:', csvData[0]);
-                    
-                    // Check for data issues
-                    const missingCounty = csvData.filter(row => !row['Primary county'] || row['Primary county'] === '');
-                    const missingYear = csvData.filter(row => !row['Join year'] || isNaN(row['Join year']));
-                    console.log('Records missing county:', missingCounty.length);
-                    console.log('Records missing/invalid year:', missingYear.length);
                     
                     await loadCountyBoundaries();
                     setupSectorColors();
@@ -250,28 +229,20 @@
                 }
             }
 
-            let countyBoundaries = {}; // Store actual county boundary coordinates
-            let memberPositions = {}; // Store consistent positions for each member
+            let countyBoundaries = {};
+            let memberPositions = {};
             
-            // Load California counties GeoJSON
             async function loadCountyBoundaries() {
                 try {
                     const countiesUrl = 'https://raw.githubusercontent.com/pluricalifornia/CoP/main/data/CA_COUNTIES.json';
                     const response = await fetch(countiesUrl);
                     const countiesData = await response.json();
                     
-                    console.log('Loaded counties data, total features:', countiesData.features.length);
-                    
-                    // Filter for Central Coast counties and create graphics
                     const centralCoastCounties = ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'];
-                    const countyGraphics = [];
                     
                     countiesData.features.forEach((feature, index) => {
                         const countyName = feature.properties.NAME;
                         if (centralCoastCounties.includes(countyName)) {
-                            console.log('Processing county:', countyName);
-                            
-                            // Store boundary coordinates for point-in-polygon testing
                             storeBoundaryCoordinates(countyName, feature.geometry);
                             
                             try {
@@ -297,7 +268,7 @@
                                             COUNTY: countyName
                                         },
                                         symbol: new SimpleFillSymbol({
-                                            color: [...hexToRgb(countyColors[countyName] || '#cccccc'), 0.3], // County-specific color
+                                            color: [...hexToRgb(countyColors[countyName] || '#cccccc'), 0.3],
                                             outline: {
                                                 color: [100, 100, 100, 0.8],
                                                 width: 2
@@ -309,8 +280,6 @@
                                         }
                                     });
                                     
-                                    console.log(`Created county graphic for ${countyName} with color:`, countyColors[countyName]);
-                                    countyGraphics.push(graphic);
                                     graphicsLayer.add(graphic);
                                 }
                             } catch (geomError) {
@@ -319,7 +288,6 @@
                         }
                     });
                     
-                    console.log('Added county graphics:', countyGraphics.length);
                     updateCountyCoordinates(countiesData);
                     
                 } catch (error) {
@@ -327,22 +295,19 @@
                 }
             }
 
-            // Store boundary coordinates for point-in-polygon testing
             function storeBoundaryCoordinates(countyName, geometry) {
                 let coordinates = [];
                 
                 if (geometry.type === 'Polygon') {
-                    // Get the outer ring (first ring) and convert from Web Mercator to WGS84
                     coordinates = geometry.coordinates[0].map(coord => {
                         return webMercatorToWGS84(coord[0], coord[1]);
                     });
                 } else if (geometry.type === 'MultiPolygon') {
-                    // Get the outer ring of the largest polygon
                     let largestArea = 0;
                     let largestRing = null;
                     
                     geometry.coordinates.forEach(polygon => {
-                        const ring = polygon[0]; // outer ring
+                        const ring = polygon[0];
                         const area = calculatePolygonArea(ring);
                         if (area > largestArea) {
                             largestArea = area;
@@ -356,17 +321,14 @@
                 }
                 
                 countyBoundaries[countyName] = coordinates;
-                console.log(`Stored ${coordinates.length} boundary points for ${countyName}`);
             }
 
-            // Convert Web Mercator to WGS84 (approximate)
             function webMercatorToWGS84(x, y) {
                 const lng = x / 111320.0;
                 const lat = (180.0 / Math.PI) * (2.0 * Math.atan(Math.exp(y * Math.PI / 20037508.34)) - Math.PI / 2.0);
                 return [lng, lat];
             }
 
-            // Calculate approximate area of polygon for MultiPolygon handling
             function calculatePolygonArea(ring) {
                 let area = 0;
                 const n = ring.length - 1;
@@ -376,7 +338,6 @@
                 return Math.abs(area) / 2;
             }
 
-            // Point-in-polygon test using ray casting algorithm
             function isPointInPolygon(point, polygon) {
                 const [x, y] = point;
                 let inside = false;
@@ -394,7 +355,6 @@
                 return inside;
             }
 
-            // Convert hex color to RGB array
             function hexToRgb(hex) {
                 const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
                 return result ? [
@@ -404,12 +364,9 @@
                 ] : [200, 200, 200];
             }
 
-            // Generate random point within county boundary using point-in-polygon testing
             function getRandomPointInCounty(countyName) {
                 const boundary = countyBoundaries[countyName];
                 if (!boundary || boundary.length === 0) {
-                    console.warn('No boundary data for county:', countyName);
-                    // Fallback to centroid with small random offset
                     const center = countyCoords[countyName];
                     if (center) {
                         return [
@@ -417,10 +374,9 @@
                             center[1] + (Math.random() - 0.5) * 0.1
                         ];
                     }
-                    return [-120.5, 35.5]; // Default fallback
+                    return [-120.5, 35.5];
                 }
                 
-                // Get bounding box of the county
                 let minLng = Infinity, maxLng = -Infinity;
                 let minLat = Infinity, maxLat = -Infinity;
                 
@@ -431,7 +387,6 @@
                     maxLat = Math.max(maxLat, coord[1]);
                 });
                 
-                // Generate random point within polygon using rejection sampling
                 let attempts = 0;
                 let point;
                 
@@ -446,31 +401,21 @@
                         return point;
                     }
                     
-                } while (attempts < 500); // Increased attempts to find valid points
+                } while (attempts < 500);
                 
-                console.warn(`Could not find valid point in ${countyName} after 500 attempts, using centroid`);
-                // If we can't find a point inside, fall back to centroid
                 return countyCoords[countyName] || [-120.5, 35.5];
             }
 
-            // Get or create consistent position for a member
             function getMemberPosition(member, county) {
-                // Use Object ID as the primary unique identifier
-                const memberKey = `${county}-${member['Object ID'] || member.uniqueId}`;
+                const memberKey = `${county}-${member['Object ID']}`;
                 
                 if (!memberPositions[memberKey]) {
-                    // This is a new member appearing for the first time - generate random position
                     memberPositions[memberKey] = getRandomPointInCounty(county);
-                    console.log(`New member placed at random position in ${county}: ID ${member['Object ID']}`);
-                } else {
-                    // This member already exists - use their cached position
-                    console.log(`Using cached position for existing member in ${county}: ID ${member['Object ID']}`);
                 }
                 
                 return memberPositions[memberKey];
             }
 
-            // Update county coordinates from GeoJSON centroids
             function updateCountyCoordinates(countiesData) {
                 const centralCoastCounties = ['Monterey', 'Santa Cruz', 'Santa Barbara', 'San Benito', 'Ventura', 'San Luis Obispo'];
                 
@@ -478,18 +423,14 @@
                     const countyName = feature.properties.NAME;
                     
                     if (centralCoastCounties.includes(countyName)) {
-                        // Use the provided centroid coordinates (INTPTLAT, INTPTLON)
                         const lat = parseFloat(feature.properties.INTPTLAT);
                         const lng = parseFloat(feature.properties.INTPTLON);
                         
                         if (!isNaN(lat) && !isNaN(lng)) {
                             countyCoords[countyName] = [lng, lat];
-                            console.log('Updated coordinates for', countyName, ':', [lng, lat]);
                         }
                     }
                 });
-                
-                console.log('Final county coordinates:', countyCoords);
             }
             
             function setupSectorColors() {
@@ -507,7 +448,6 @@
                 
                 const s = sector.toLowerCase().trim();
                 
-                // Group similar sectors
                 if (s.includes('govt') || s.includes('government')) return 'Government';
                 if (s.includes('nonprofit') || s.includes('non-profit')) return 'Nonprofit';
                 if (s.includes('farm') && !s.includes('market')) return 'Farming';
@@ -522,7 +462,6 @@
             }
             
             function setupUI() {
-                // Setup year filter
                 const years = [...new Set(csvData.map(row => row['Join year']).filter(Boolean))].sort();
                 const yearSelect = document.getElementById('yearSelect');
                 years.forEach(year => {
@@ -537,10 +476,8 @@
                     updateVisualization();
                 });
                 
-                // Setup legend for years
                 const legendItems = document.getElementById('legendItems');
                 
-                // Year legend
                 legendItems.innerHTML = '<strong>By Join Year:</strong><br>';
                 Object.entries(yearColors).forEach(([year, color]) => {
                     const item = document.createElement('div');
@@ -552,12 +489,10 @@
                     legendItems.appendChild(item);
                 });
                 
-                // Add separator
                 const separator = document.createElement('div');
                 separator.innerHTML = '<br><strong>By Sector:</strong><br>';
                 legendItems.appendChild(separator);
                 
-                // Sector legend
                 Object.entries(sectorColors).forEach(([sector, color]) => {
                     const item = document.createElement('div');
                     item.className = 'legend-item';
@@ -568,7 +503,6 @@
                     legendItems.appendChild(item);
                 });
                 
-                // Setup time controls
                 const playPauseBtn = document.getElementById('playPause');
                 const timeSlider = document.getElementById('timeSlider');
                 
@@ -590,13 +524,12 @@
                         currentMonth++;
                         if (currentMonth > 12) {
                             currentMonth = 1;
-                            // Move to next year if data exists
                             const years = [...new Set(csvData.map(row => row['Join year']).filter(Boolean))].sort();
                             const currentYearIndex = years.indexOf(currentYear);
                             if (currentYearIndex < years.length - 1) {
                                 currentYear = years[currentYearIndex + 1];
                             } else {
-                                currentYear = years[0]; // Loop back to first year
+                                currentYear = years[0];
                             }
                         }
                         
@@ -609,108 +542,55 @@
             }
             
             function updateVisualization() {
-                // Remove only the member dots, keep county boundaries
                 const memberGraphics = graphicsLayer.graphics.filter(g => g.attributes && g.attributes.county);
                 graphicsLayer.removeMany(memberGraphics.toArray());
                 
-                console.log('=== VISUALIZATION UPDATE ===');
                 console.log('Current time:', `${currentMonth}/${currentYear}`);
-                console.log('Selected year filter:', selectedYear);
                 console.log('Total CSV records:', csvData.length);
                 
-                // Filter data based on current time and year filter
                 let filteredData = csvData.filter(row => {
                     const hasCounty = row['Primary county'] && row['Primary county'] !== '';
                     const hasYear = row['Join year'] && !isNaN(row['Join year']);
                     const hasMonth = row['Join month'] && !isNaN(row['Join month']);
                     
-                    if (!hasCounty || !hasYear || !hasMonth) {
-                        return false;
-                    }
-                    
+                    if (!hasCounty || !hasYear || !hasMonth) return false;
                     if (selectedYear !== 'all' && row['Join year'] != selectedYear) return false;
                     
-                    // Show cumulative data up to current month/year (inclusive)
                     const memberYear = parseInt(row['Join year']);
                     const memberMonth = parseInt(row['Join month']);
                     
-                    // Include if member joined before current year
                     if (memberYear < currentYear) return true;
-                    
-                    // Include if member joined in current year, up to and including current month
                     if (memberYear === currentYear && memberMonth <= currentMonth) return true;
                     
                     return false;
                 });
                 
                 console.log('Filtered data count:', filteredData.length);
-                console.log('=== MEMBER TRACKING DEBUG ===');
-                console.log('Filtered data count:', filteredData.length);
                 
-                // Debug: Check for duplicate Object IDs in filtered data
-                const objectIds = filteredData.map(row => row['Object ID']).filter(Boolean);
-                const uniqueObjectIds = [...new Set(objectIds)];
-                console.log('Unique Object IDs in filtered data:', uniqueObjectIds.length);
-                console.log('Total Object IDs in filtered data:', objectIds.length);
-                
-                if (objectIds.length !== uniqueObjectIds.length) {
-                    console.warn('Duplicate Object IDs detected!');
-                    const duplicates = objectIds.filter((id, index) => objectIds.indexOf(id) !== index);
-                    console.log('Duplicate IDs:', [...new Set(duplicates)]);
-                }
-                
-                // Group by county and sector for positioning
                 const countyData = {};
-                let processedMembers = 0;
                 filteredData.forEach((row, index) => {
                     const county = row['Primary county'];
                     const sector = normalizeSector(row['Sector represented ']) || 'Unknown';
                     const objectId = row['Object ID'] || `fallback-${index}`;
                     
-                    if (!county || county === '') {
-                        console.warn('Member with no county:', row);
-                        return; // Skip members without county
-                    }
+                    if (!county || county === '') return;
                     
                     if (!countyData[county]) countyData[county] = {};
                     if (!countyData[county][sector]) countyData[county][sector] = [];
                     
-                    // Use Object ID to ensure no member is lost or duplicated
-                    const memberWithId = { ...row, objectId: objectId };
-                    countyData[county][sector].push(memberWithId);
-                    processedMembers++;
+                    countyData[county][sector].push({ ...row, objectId: objectId });
                 });
                 
-                console.log('County data groups:', Object.keys(countyData));
-                console.log('Processed members into groups:', processedMembers);
-                console.log('Detailed county breakdown:');
-                let totalMembersInGroups = 0;
-                Object.entries(countyData).forEach(([county, sectors]) => {
-                    const sectorCounts = Object.entries(sectors).map(([sector, members]) => `${sector}: ${members.length}`);
-                    const total = Object.values(sectors).reduce((sum, members) => sum + members.length, 0);
-                    totalMembersInGroups += total;
-                    console.log(`  ${county}: ${total} members (${sectorCounts.join(', ')})`);
-                });
-                console.log('Total members in groups: ' + totalMembersInGroups + ' (should match filtered: ' + filteredData.length + ', processed: ' + processedMembers + ')');
-                
-                // Create dots with consistent random positioning within county boundaries
                 let totalDotsAdded = 0;
-                let failedPlacements = 0;
                 
                 Object.entries(countyData).forEach(([county, sectors]) => {
-                    console.log(`Processing dots for ${county}:`, Object.keys(sectors).length, 'sectors');
-                    
                     Object.entries(sectors).forEach(([sector, members]) => {
                         members.forEach((member) => {
                             const position = getMemberPosition(member, county);
                             const joinYear = member['Join year'];
                             const dotColor = yearColors[joinYear] || '#666666';
                             
-                            console.log(`Creating dot ${totalDotsAdded + 1} for ${county}, ID ${member['Object ID'] || member.objectId}, year ${joinYear}, color: ${dotColor}`);
-                            
                             if (!position || position.length !== 2 || isNaN(position[0]) || isNaN(position[1])) {
-                                console.warn('Invalid position for member:', member, 'position:', position);
-                                failedPlacements++;
                                 return;
                             }
                             
@@ -724,7 +604,7 @@
                                     color: dotColor,
                                     size: 10,
                                     outline: {
-                                        color: [255, 255, 255, 1], // White outline
+                                        color: [255, 255, 255, 1],
                                         width: 2
                                     }
                                 }),
@@ -754,24 +634,9 @@
                 });
                 
                 console.log('Total dots added:', totalDotsAdded);
-                console.log('Failed placements:', failedPlacements);
-                console.log('=== END VISUALIZATION UPDATE ===');
                 
-                // Update UI
                 updateCurrentTime();
                 updateStatistics(filteredData);
-            }
-            
-            function getSpiralPosition(center, index, spacing) {
-                if (index === 0) return center;
-                
-                const angle = index * 0.5;
-                const radius = Math.sqrt(index) * spacing;
-                
-                return [
-                    center[0] + radius * Math.cos(angle),
-                    center[1] + radius * Math.sin(angle)
-                ];
             }
             
             function updateCurrentTime() {
@@ -784,10 +649,18 @@
                     `${monthNames[currentMonth - 1]} ${currentYear}`;
             }
             
-            function updateStatistics(countyStats) {
+            function updateStatistics(filteredData) {
                 const statsContent = document.getElementById('statsContent');
                 
-                const totalMembers = Object.values(countyStats).reduce((sum, count) => sum + count, 0);
+                const countyStats = {};
+                filteredData.forEach(row => {
+                    const county = row['Primary county'];
+                    if (county) {
+                        countyStats[county] = (countyStats[county] || 0) + 1;
+                    }
+                });
+                
+                const totalMembers = filteredData.length;
                 
                 let statsHTML = `<div class="stat-row"><strong>Total Members: ${totalMembers}</strong></div><br>`;
                 
@@ -801,7 +674,6 @@
                 statsContent.innerHTML = statsHTML;
             }
             
-            // Initialize the application
             view.when(() => {
                 loadCSVData();
             });
